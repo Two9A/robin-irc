@@ -31,7 +31,12 @@ Then configure your preferred IRC client. A sample configuration for irssi follo
       };
     };
     channels = (
-      { name = "#a"; chatnet = "Robin"; autojoin = "Yes"; }
+      { name = "#general"; chatnet = "Robin"; autojoin = "Yes"; },
+      { name = "#chat"; chatnet = "Robin"; autojoin = "Yes"; },
+      { name = "#trivia"; chatnet = "Robin"; autojoin = "Yes"; },
+      { name = "#dev"; chatnet = "Robin"; autojoin = "Yes"; },
+      { name = "#rpg"; chatnet = "Robin"; autojoin = "Yes"; },
+      { name = "#penis"; chatnet = "Robin"; autojoin = "Yes"; }
     );
 
 Finally, use a web browser to get into a Robin chat (the bridge doesn't have the ability to click on the Participate button).

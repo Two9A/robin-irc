@@ -9,15 +9,10 @@ class Robin_IRC {
      */
     protected $prefixes = array(
         '%chat'  => '#chat',
-        '%'      => '#percent',
         '^'      => '#dev',
         'penis/' => '#penis',
-        '+'      => '#plus',
         '$'      => '#trivia',
-        '~'      => '#tilde',
-        '@'      => '#at',
         '#rpg'   => '#rpg',
-        '#'      => '#hash',
     );
 
     /**
