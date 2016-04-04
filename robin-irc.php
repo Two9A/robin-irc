@@ -5,19 +5,19 @@ require_once 'websocket/websocket.inc.php';
 
 class Robin_IRC {
     /**
-     * Chat prefixes, and the colors their lines will get assigned
+     * Chat prefixes, and the channels they'll end up in
      */
     protected $prefixes = array(
-        '%chat'  => self::COLOR_GREEN,
-        '%'      => self::COLOR_NAVY,
-        '^'      => self::COLOR_RED,
-        'penis/' => self::COLOR_YELLOW,
-        '+'      => self::COLOR_ORANGE,
-        '$'      => self::COLOR_AQUA,
-        '~'      => self::COLOR_BROWN,
-        '@'      => self::COLOR_PURPLE,
-        '#rpg'   => self::COLOR_GREY,
-        '#'      => self::COLOR_TEAL,
+        '%chat'  => '#chat',
+        '%'      => '#percent',
+        '^'      => '#dev',
+        'penis/' => '#penis',
+        '+'      => '#plus',
+        '$'      => '#trivia',
+        '~'      => '#tilde',
+        '@'      => '#at',
+        '#rpg'   => '#rpg',
+        '#'      => '#hash',
     );
 
     /**
@@ -39,9 +39,9 @@ class Robin_IRC {
     const IRC_PORT = 8194;
 
     /**
-     * IRC channel used as a placeholder for the Robin chat
+     * IRC channel used as a placeholder for unfiltered Robin
      */
-    const IRC_CHANNEL = '#a';
+    const IRC_CHANNEL = '#general';
 
     /**
      * Non-configurable constants
@@ -254,6 +254,8 @@ class Robin_IRC {
         $this->robin_last_load_time = time();
         $this->debug('ROBIN', 'Connected.');
         $this->out_irc(null, 'NOTICE', 'AUTH', 'Connected.');
+
+        $this->out_robin('vote', 'INCREASE');
     }
 
     protected function out_robin($type, $payload) {
@@ -356,7 +358,7 @@ class Robin_IRC {
                         break;
 
                     case 'PRIVMSG':
-                        $channel = substr($args[0], 0, strpos($args[0], ':'));
+                        $channel = trim(substr($args[0], 0, strpos($args[0], ':')));
                         $str = substr($args[0], strpos($args[0], ':') + 1);
 
                         if (strpos($str, "\001ACTION") === 0) {
@@ -365,6 +367,15 @@ class Robin_IRC {
                                 "\001" => ''
                             ));
                             $str = '/me '.$str;
+                        }
+
+                        if (in_array($channel, $this->prefixes)) {
+                            foreach ($this->prefixes as $prefix => $ccode) {
+                                if ($channel == $ccode) {
+                                    $str = "{$prefix} {$str}";
+                                    break;
+                                }
+                            }
                         }
 
                         $this->last_message = $str;
@@ -401,7 +412,16 @@ class Robin_IRC {
                         ) {
                             // Do nothing if we just sent this message
                         } else {
-                            $this->out_irc($payload['from'], 'PRIVMSG', self::IRC_CHANNEL, $this->filter_body($payload['body']));
+                            list($channel, $body) = $this->filter_channel($payload['body']);
+                            $body = $this->filter_body($body);
+                            if ($body) {
+                                if (strpos($body, '/me ') === 0) {
+                                    $body = substr($body, strlen('/me '));
+                                    $this->out_irc($payload['from'], 'PRIVMSG', $channel, "\001ACTION {$body}\001");
+                                } else {
+                                    $this->out_irc($payload['from'], 'PRIVMSG', $channel, $body);
+                                }
+                            }
                         }
                         break;
                     case 'VOTE':
@@ -429,18 +449,20 @@ class Robin_IRC {
                 return false;
             }
         }
+        return $body;
+    }
 
-        $color = '';
+    protected function filter_channel($body) {
+        $channel = self::IRC_CHANNEL;
         foreach ($this->prefixes as $prefix => $ccode) {
             if (strpos($body, $prefix) === 0) {
-                $color = $ccode;
+                $channel = $ccode;
+                $body = trim(substr($body, strlen($prefix)));
                 break;
             }
         }
-        if ($color) {
-            $body = "\003{$color}{$body}\003";
-        }
-        return $body;
+
+        return array($channel, $body);
     }
 
     protected function debug($type, $str) {
