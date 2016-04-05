@@ -318,7 +318,7 @@ class Robin_IRC {
     }
 
     public function __call($name, $args) {
-        list($protocol, $msg) = split('_', $name);
+        list($protocol, $msg) = split('_', $name, 2);
         switch (strtoupper($protocol)) {
             case 'IRC':
                 switch (strtoupper($msg)) {
@@ -435,6 +435,9 @@ class Robin_IRC {
                         break;
                     case 'PLEASE_VOTE':
                         $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'Polls are closing soon, please vote');
+                        break;
+                    case 'NO_MATCH':
+                        $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'no compatible room found for matching, we will count votes and check again for a match in 1 minute.');
                         break;
                     case 'SYSTEM_BROADCAST':
                         $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, $payload['body']);
