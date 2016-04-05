@@ -5,22 +5,9 @@ require_once 'websocket/websocket.inc.php';
 
 class Robin_IRC {
     /**
-     * Chat prefixes, and the channels they'll end up in
+     * Filter/channel configuration file, read every ROBIN_TIMEOUT seconds
      */
-    protected $prefixes = array(
-        '%chat'  => '#chat',
-        '^'      => '#dev',
-        'penis/' => '#penis',
-        '$'      => '#trivia',
-        '#rpg'   => '#rpg',
-    );
-
-    /**
-     * Lines to automatically filter out, by regex
-     */
-    protected $body_filters = array(
-        '/^\[/',
-    );
+    const INI = 'robin-irc.ini';
 
     /**
      * Disable debug printouts by setting DEBUG to 0
@@ -68,6 +55,9 @@ class Robin_IRC {
     const COLOR_PINK   = '13';
     const COLOR_GREY   = '14';
     const COLOR_SILVER = '15';
+
+    protected $prefixes = array();
+    protected $body_filters = array();
 
     protected $ircsock;
 
@@ -250,7 +240,18 @@ class Robin_IRC {
         $this->debug('ROBIN', 'Connected.');
         $this->out_irc(null, 'NOTICE', 'AUTH', 'Connected.');
 
-        $this->out_robin('vote', 'INCREASE');
+        $ini = parse_ini_file(self::INI, true);
+        $this->body_filters = $ini['filters']['filter'];
+        $this->prefixes = array();
+        foreach ($ini['channels'] as $ccode => $prefix) {
+            $this->prefixes[$prefix] = '#'.$ccode;
+        }
+
+        $vote = 'INCREASE';
+        if (isset($ini['general']['autovote'])) {
+            $vote = $ini['general']['autovote'];
+        }
+        $this->out_robin('vote', $vote);
     }
 
     protected function out_robin($type, $payload) {

@@ -41,6 +41,12 @@ Then configure your preferred IRC client. A sample configuration for irssi follo
 
 Finally, use a web browser to get into a Robin chat (the bridge doesn't have the ability to click on the Participate button).
 
+## Configuration
+
+The included `robin-irc.ini` file comes pre-configured with a few channels and body filters. Once the server is started, the configuration file is read every 5 minutes; thus, filters and channels can be changed without your IRC client dropping connection.
+
+The same refresh interval applies for automatic votes: if the `general.autovote` configuration setting is changed to one of `INCREASE`, `CONTINUE` or `ABANDON`, the new vote will be broadcast within five minutes.
+
 ## Caveats
 
 Oh, where do I start?
