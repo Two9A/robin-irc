@@ -362,7 +362,10 @@ class Robin_IRC {
                                 "\001ACTION" => '',
                                 "\001" => ''
                             ));
-                            $str = '/me '.$str;
+                            $action = 1;
+                        }
+                        else {
+                            $action = 0;
                         }
 
                         if (in_array($channel, $this->prefixes)) {
@@ -373,6 +376,8 @@ class Robin_IRC {
                                 }
                             }
                         }
+                        if ( $action )
+                            $str = '/me '.$str;
 
                         $this->last_message = $str;
 
@@ -408,15 +413,20 @@ class Robin_IRC {
                         ) {
                             // Do nothing if we just sent this message
                         } else {
-                            list($channel, $body) = $this->filter_channel($payload['body']);
+                            $body = $payload['body'];
+                            if (strpos($body, '/me ') === 0) {
+                                $body = substr($body, strlen('/me '));
+                                $action = 1;
+                            }
+                            else {
+                                $action = 0;
+                            }
+                            list($channel, $body) = $this->filter_channel($body);
                             $body = $this->filter_body($body);
                             if ($body) {
-                                if (strpos($body, '/me ') === 0) {
-                                    $body = substr($body, strlen('/me '));
-                                    $this->out_irc($payload['from'], 'PRIVMSG', $channel, "\001ACTION {$body}\001");
-                                } else {
-                                    $this->out_irc($payload['from'], 'PRIVMSG', $channel, $body);
-                                }
+                                if ( $action )
+                                    $body = "\001ACTION {$body}\001";
+                                $this->out_irc($payload['from'], 'PRIVMSG', $channel, $body);
                             }
                         }
                         break;
