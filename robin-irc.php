@@ -58,6 +58,7 @@ class Robin_IRC {
 
     protected $prefixes = array();
     protected $body_filters = array();
+    protected $show_votes = true;
 
     protected $ircsock;
 
@@ -257,6 +258,8 @@ class Robin_IRC {
         foreach ($ini['channels'] as $ccode => $prefix) {
             $this->prefixes[$prefix] = '#'.$ccode;
         }
+
+        $this->show_votes = $ini['general']['showvotes'];
 
         $vote = 'INCREASE';
         if (isset($ini['general']['autovote'])) {
@@ -489,7 +492,9 @@ class Robin_IRC {
                         else {
                             $this->debug('WARN', "No such user: " . $userkey);
                         }
-                        $this->out_irc($payload['from'], 'PRIVMSG', self::IRC_CHANNEL, "\001ACTION voted to {$payload['vote']}\001");
+                        if ($this->show_votes) {
+                            $this->out_irc($payload['from'], 'PRIVMSG', self::IRC_CHANNEL, "\001ACTION voted to {$payload['vote']}\001");
+                        }
                         break;
                     case 'PLEASE_VOTE':
                         $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'Polls are closing soon, please vote');
