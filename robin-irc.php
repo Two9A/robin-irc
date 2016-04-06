@@ -73,6 +73,7 @@ class Robin_IRC {
     protected $robin_name;
     protected $robin_cookies;
     protected $robin_last_load_time;
+    protected $users = array();
 
     protected $last_message;
 
@@ -105,7 +106,7 @@ class Robin_IRC {
                     if ($line && strlen($line)) {
                         $this->debug('IRC<-', $line);
                         $pos = strpos($line, ' ');
-                        if ( $pos === false ) {
+                        if ($pos === false) {
                             $cmd = $line;
                             $msg = array();
                         }
@@ -310,8 +311,9 @@ class Robin_IRC {
             return;
         }
 
-        if ( is_array($prefix) )
+        if (is_array($prefix)) {
             $prefix = join(' ', $prefix);
+        }
 
         if ($nick) {
             $mask = sprintf("%s!%s@%s", $nick, $nick, self::ROBIN_HOST);
@@ -320,8 +322,9 @@ class Robin_IRC {
         }
 
         $buf = sprintf(":%s %s %s", $mask, $code, $prefix);
-        if ( $str )
+        if ($str) {
             $buf = sprintf("%s :%s", $buf, $str);
+        }
         $this->debug('IRC->', $buf);
         if ($this->listen_sockets[self::IRC_SOCK]) {
             fprintf($this->listen_sockets[self::IRC_SOCK], "%s\r\n", $buf);
@@ -353,7 +356,7 @@ class Robin_IRC {
                         $this->out_irc(null, '375', $this->redditnick, sprintf("- %s MOTD -", self::ROBIN_HOST));
                         $this->out_irc(null, '372', $this->redditnick, "- Current tally of votes");
                         $this->out_irc(null, '372', $this->redditnick, "- ----------------------");
-                        foreach ( array('NOVOTE', 'ABANDON', 'CONTINUE', 'INCREASE') as $key ) {
+                        foreach (array('NOVOTE', 'ABANDON', 'CONTINUE', 'INCREASE') as $key) {
                             $this->out_irc(null, '372', $this->redditnick, sprintf("-     %5d %-8s", $tally[$key], $key));
                         }
                         $this->out_irc(null, '372', $this->redditnick, "- ----------------------");
@@ -384,10 +387,10 @@ class Robin_IRC {
                                 "\001ACTION" => '',
                                 "\001" => ''
                             ));
-                            $action = 1;
+                            $action = true;
                         }
                         else {
-                            $action = 0;
+                            $action = false;
                         }
 
                         if (in_array($channel, $this->prefixes)) {
@@ -398,11 +401,11 @@ class Robin_IRC {
                                 }
                             }
                         }
-                        if ( $action )
+                        if ($action) {
                             $str = '/me '.$str;
+                        }
 
                         $this->last_message = $str;
-
                         $this->out_robin('message', $str);
                         break;
 
@@ -410,12 +413,13 @@ class Robin_IRC {
                         $users = split(',', $args[0]);
                         foreach ($users as $user) {
                             $userkey = strtoupper($user);
-                            if ( array_key_exists($userkey, $this->users) ) {
+                            if (isset($this->users[$userkey])) {
                                 $user = $this->users[$userkey];
                                 $userstr = $user['name'];
                                 $this->out_irc(null, '311', array($this->redditnick, $userstr, $userstr, self::ROBIN_HOST, "*"), $user['vote']);
-                                if ( !$user['present'] )
+                                if (!$user['present']) {
                                     $this->out_irc(null, '301', array($this->redditnick, $userstr), "not present");
+                                }
                                 $this->out_irc(null, '318', array($this->redditnick, $userstr), "End of /WHOIS");
                             }
                             else {
@@ -442,7 +446,7 @@ class Robin_IRC {
                     case 'JOIN':
                     case 'PART':
                         $userkey = strtoupper($payload['user']);
-                        if ( !array_key_exists($userkey, $this->users) ) {
+                        if (!isset($this->users[$userkey])) {
                             $this->debug('WARN', "No such user: " . $userkey);
                             $this->users[$userkey]['present'] = array('vote' => "NOVOTE", 'name' => $payload['user'], 'present' => false);
                         }
@@ -462,30 +466,30 @@ class Robin_IRC {
                             $body = $payload['body'];
                             if (strpos($body, '/me ') === 0) {
                                 $body = substr($body, strlen('/me '));
-                                $action = 1;
+                                $action = true;
                             }
                             else {
-                                $action = 0;
+                                $action = false;
                             }
                             list($channel, $body) = $this->filter_channel($body);
                             $body = $this->filter_body($body);
                             if ($body) {
-                                if ( $action )
+                                if ($action) {
                                     $body = "\001ACTION {$body}\001";
+                                }
                                 $this->out_irc($payload['from'], 'PRIVMSG', $channel, $body);
                             }
                         }
                         break;
                     case 'VOTE':
                         $userkey = strtoupper($payload['from']);
-                        if ( array_key_exists($userkey, $this->users) ) {
+                        if (isset($this->users[$userkey])) {
                             $this->users[$userkey]['vote'] = $payload['vote'];
                         }
                         else {
                             $this->debug('WARN', "No such user: " . $userkey);
                         }
                         $this->out_irc($payload['from'], 'PRIVMSG', self::IRC_CHANNEL, "\001ACTION voted to {$payload['vote']}\001");
-                        //$this->out_irc($payload['from'], 'NOTICE', self::IRC_CHANNEL, "voted to {$payload['vote']}");
                         break;
                     case 'PLEASE_VOTE':
                         $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'Polls are closing soon, please vote');
@@ -531,10 +535,10 @@ class Robin_IRC {
     public function tally() {
         $tally = array();
         foreach ($this->users as $k => $user) {
-            if ( array_key_exists($user['vote'], $tally) )
-                $tally[$user['vote']]++;
-            else
-                $tally[$user['vote']] = 1;
+            if (!isset($tally[$user['vote']])) {
+                $tally[$user['vote']] = 0;
+            }
+            $tally[$user['vote']]++;
         }
         return $tally;
     }
