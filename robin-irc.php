@@ -104,10 +104,16 @@ class Robin_IRC {
                     $line = trim(fgets($this->listen_sockets[self::IRC_SOCK], 8192));
                     if ($line && strlen($line)) {
                         $this->debug('IRC<-', $line);
-                        $cmd = substr($line, 0, strpos($line, ' '));
-                        $msg = substr($line, strpos($line, ' ') + 1);
-
-                        call_user_func_array(array($this, 'irc_'.$cmd), array($msg));
+                        $pos = strpos($line, ' ');
+                        if ( $pos === false ) {
+                            $cmd = $line;
+                            $msg = array();
+                        }
+                        else {
+                            $cmd = substr($line, 0, $pos);
+                            $msg = array(substr($line, $pos + 1));
+                        }
+                        call_user_func_array(array($this, 'irc_'.$cmd), $msg);
                     }
 
                     if (isset($this->listen_sockets[self::ROBIN_SOCK])) {
@@ -225,6 +231,10 @@ class Robin_IRC {
         $this->robin_url  = $config_json['robin_websocket_url'];
         $this->robin_id   = $config_json['robin_room_id'];
         $this->robin_name = $config_json['robin_room_name'];
+        $this->users      = array();
+        foreach ($config_json['robin_user_list'] as $user) {
+            $this->users[strtoupper($user['name'])] = $user;
+        }
 
         $this->redditmodhash = $config_json['modhash'];
 
@@ -300,20 +310,21 @@ class Robin_IRC {
             return;
         }
 
-        $this->debug('IRC->', sprintf('%s %s %s', $code, $prefix, $str));
+        if ( is_array($prefix) )
+            $prefix = join(' ', $prefix);
+
         if ($nick) {
             $mask = sprintf("%s!%s@%s", $nick, $nick, self::ROBIN_HOST);
         } else {
             $mask = self::IRC_HOST;
         }
+
+        $buf = sprintf(":%s %s %s", $mask, $code, $prefix);
+        if ( $str )
+            $buf = sprintf("%s :%s", $buf, $str);
+        $this->debug('IRC->', $buf);
         if ($this->listen_sockets[self::IRC_SOCK]) {
-            fprintf(
-                $this->listen_sockets[self::IRC_SOCK], ":%s %s %s :%s\r\n",
-                $mask,
-                $code,
-                $prefix,
-                $str
-            );
+            fprintf($this->listen_sockets[self::IRC_SOCK], "%s\r\n", $buf);
         }
     }
 
@@ -331,12 +342,23 @@ class Robin_IRC {
                         break;
 
                     case 'USER':
+                        $this->login();
                         $this->out_irc(null, '001', $this->redditnick, sprintf("Welcome to Robin/IRC bridge %s!%s@%s", $this->redditnick, $this->redditnick, self::ROBIN_HOST));
                         $this->out_irc(null, '002', $this->redditnick, "PREFIX=(qov)~@+");
-                        $this->out_irc(null, '375', $this->redditnick, sprintf(":- %s MOTD -", self::ROBIN_HOST));
-                        $this->out_irc(null, '376', $this->redditnick, ":End of MOTD");
+                        $this->irc_motd();
+                        break;
 
-                        $this->login();
+                    case 'MOTD':
+                        $tally = $this->tally();
+                        $this->out_irc(null, '375', $this->redditnick, sprintf("- %s MOTD -", self::ROBIN_HOST));
+                        $this->out_irc(null, '372', $this->redditnick, "- Current tally of votes");
+                        $this->out_irc(null, '372', $this->redditnick, "- ----------------------");
+                        foreach ( array('NOVOTE', 'ABANDON', 'CONTINUE', 'INCREASE') as $key ) {
+                            $this->out_irc(null, '372', $this->redditnick, sprintf("-     %5d %-8s", $tally[$key], $key));
+                        }
+                        $this->out_irc(null, '372', $this->redditnick, "- ----------------------");
+                        $this->out_irc(null, '372', $this->redditnick, sprintf("-     %5d total users", count($this->users)));
+                        $this->out_irc(null, '376', $this->redditnick, "End of MOTD");
                         break;
 
                     case 'JOIN':
@@ -384,6 +406,24 @@ class Robin_IRC {
                         $this->out_robin('message', $str);
                         break;
 
+                    case 'WHOIS':
+                        $users = split(',', $args[0]);
+                        foreach ($users as $user) {
+                            $userkey = strtoupper($user);
+                            if ( array_key_exists($userkey, $this->users) ) {
+                                $user = $this->users[$userkey];
+                                $userstr = $user['name'];
+                                $this->out_irc(null, '311', array($this->redditnick, $userstr, $userstr, self::ROBIN_HOST, "*"), $user['vote']);
+                                if ( !$user['present'] )
+                                    $this->out_irc(null, '301', array($this->redditnick, $userstr), "not present");
+                                $this->out_irc(null, '318', array($this->redditnick, $userstr), "End of /WHOIS");
+                            }
+                            else {
+                                $this->out_irc(null, '401', array($this->redditnick, $user), "No such user");
+                            }
+                        }
+                        break;
+
                     case 'PING':
                         $this->out_irc(null, 'PONG', self::ROBIN_HOST, $args[0]);
                         break;
@@ -401,6 +441,12 @@ class Robin_IRC {
                 switch (strtoupper($msg)) {
                     case 'JOIN':
                     case 'PART':
+                        $userkey = strtoupper($payload['user']);
+                        if ( !array_key_exists($userkey, $this->users) ) {
+                            $this->debug('WARN', "No such user: " . $userkey);
+                            $this->users[$userkey]['present'] = array('vote' => "NOVOTE", 'name' => $payload['user'], 'present' => false);
+                        }
+                        $this->users[$userkey]['present'] = strtoupper($msg) == 'JOIN';
                         // Maintain login by periodically refreshing
                         if (time() > ($this->robin_last_load_time + self::ROBIN_TIMEOUT)) {
                             $this->refresh();
@@ -431,7 +477,15 @@ class Robin_IRC {
                         }
                         break;
                     case 'VOTE':
+                        $userkey = strtoupper($payload['from']);
+                        if ( array_key_exists($userkey, $this->users) ) {
+                            $this->users[$userkey]['vote'] = $payload['vote'];
+                        }
+                        else {
+                            $this->debug('WARN', "No such user: " . $userkey);
+                        }
                         $this->out_irc($payload['from'], 'PRIVMSG', self::IRC_CHANNEL, "\001ACTION voted to {$payload['vote']}\001");
+                        //$this->out_irc($payload['from'], 'NOTICE', self::IRC_CHANNEL, "voted to {$payload['vote']}");
                         break;
                     case 'PLEASE_VOTE':
                         $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'Polls are closing soon, please vote');
@@ -472,6 +526,17 @@ class Robin_IRC {
         }
 
         return array($channel, $body);
+    }
+
+    public function tally() {
+        $tally = array();
+        foreach ($this->users as $k => $user) {
+            if ( array_key_exists($user['vote'], $tally) )
+                $tally[$user['vote']]++;
+            else
+                $tally[$user['vote']] = 1;
+        }
+        return $tally;
     }
 
     protected function debug($type, $str) {
