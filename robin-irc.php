@@ -32,6 +32,7 @@ class Robin_IRC {
     const REDDIT_ROBIN_URL = 'https://www.reddit.com/robin/';
     const REDDIT_REFERER_URL = 'https://www.reddit.com/login?dest=https%3A%2F%2Fwww.reddit.com%2Frobin%2Fjoin';
     const REDDIT_POST_URL = 'https://www.reddit.com/api/robin/%s/%s';
+    const REDDIT_WHOIS_URL = 'https://www.reddit.com/user/%s/about.json';
 
     const ROBIN_HOST = 'reddit.com';
     const ROBIN_TIMEOUT = 300;
@@ -72,7 +73,7 @@ class Robin_IRC {
     protected $robin_url;
     protected $robin_id;
     protected $robin_name;
-    protected $robin_cookies;
+    protected $robin_cookies = array();
     protected $robin_last_load_time;
     protected $users = array();
 
@@ -125,7 +126,7 @@ class Robin_IRC {
                         call_user_func_array(array($this, 'robin_'.$line_json['type']), array($line_json['payload']));
                     }
 
-                    usleep(500);
+                    usleep(2000);
                 }
                 $this->debug('IRC', 'Client quit');
             }
@@ -148,79 +149,75 @@ class Robin_IRC {
         return $cookies;
     }
 
-    public function login() {
-        $this->out_irc(null, 'NOTICE', 'AUTH', 'Fetching token...');
-
-        // Step 1: Fetch the login form
+    protected function curl($endpoint, $api = false, $params = array()) {
         $c = curl_init();
         $options = array(
-            CURLOPT_URL => self::REDDIT_REFERER_URL,
+            CURLOPT_URL => $endpoint,
             CURLOPT_HEADER => true,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => 10,
             CURLOPT_USERAGENT => 'Robin-IRC Bridge/0.0.1',
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_HTTPHEADER => array()
         );
+        if (count($this->robin_cookies)) {
+            $options[CURLOPT_HTTPHEADER][] = 'Cookie: '.join('; ', $this->robin_cookies);
+        }
+
+        if (count($params)) {
+            $query = http_build_query($params);
+            $options += array(
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $query,
+                CURLOPT_REFERER => 'https://www.reddit.com/',
+            );
+            $options[CURLOPT_HTTPHEADER][] = 'Content-type: application/x-www-form-urlencoded';
+            $options[CURLOPT_HTTPHEADER][] = 'Content-length: '.strlen($query);
+        }
+
+        if ($api) {
+            $options[CURLOPT_HTTPHEADER][] = 'X-Modhash: '.$this->redditmodhash;
+            $options[CURLOPT_HTTPHEADER][] = 'X-Requested-With: XMLHTTPRequest';
+        }
+
         curl_setopt_array($c, $options);
         $r = curl_exec($c);
         curl_close($c);
 
-        list($headers, $body) = split("\r\n\r\n", $r);
-        $html = new \Masterminds\HTML5();
-        $dom = $html->loadHTML($body);
-        $qp = qp($dom);
+        if ($r) {
+            list($headers, $body) = split("\r\n\r\n", $r);
+            if ($headers || $body) {
+                return array($headers, $body);
+            } else {
+                return array(false, false);
+            }
+        } else {
+            return array(false, false);
+        }
+    }
+
+    public function login() {
+        $this->out_irc(null, 'NOTICE', 'AUTH', 'Fetching token...');
+
+        // Step 1: Fetch the login form
+        list($headers, $body) = $this->curl(self::REDDIT_REFERER_URL);
 
         // Step 2: Copy the cookies from the first page load
-        $form = http_build_query(array(
+        $this->robin_cookies = $this->parse_cookies($headers);
+        list($headers, $body) = $this->curl(self::REDDIT_LOGIN_URL, false, array(
             'op' => 'login',
             'dest' => 'https://www.reddit.com/robin/',
             'user' => $this->redditnick,
             'passwd' => $this->redditpass
         ));
-        $cookies = $this->parse_cookies($headers);
-        $options += array(
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $form,
-            CURLOPT_REFERER => 'https://www.reddit.com/',
-            CURLOPT_HTTPHEADER => array(
-                'Content-type: application/x-www-form-urlencoded',
-                'Content-length: '.strlen($form),
-                'Cookie: ' . join('; ', $cookies)
-            )
-        );
-        $options[CURLOPT_URL] = self::REDDIT_LOGIN_URL;
 
-        $c = curl_init();
-        curl_setopt_array($c, $options);
-        $r = curl_exec($c);
-        curl_close($c);
-
+        $this->robin_cookies = array_merge($this->robin_cookies, $this->parse_cookies($headers));
         $this->out_irc(null, 'NOTICE', 'AUTH', 'Logged in to Reddit.');
-
-        list($headers, $body) = split("\r\n\r\n", $r);
-        $this->robin_cookies = array_merge($cookies, $this->parse_cookies($headers));
-        $this->out_irc(null, 'NOTICE', 'AUTH', 'Authenticated.');
         $this->refresh();
     }
 
     protected function refresh() {
-        $c = curl_init();
-        $options = array(
-            CURLOPT_URL => self::REDDIT_ROBIN_URL,
-            CURLOPT_HEADER => true,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_USERAGENT => 'Robin-IRC Bridge/0.0.1',
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_HTTPHEADER => array(
-                'Cookie: ' . join('; ', $this->robin_cookies)
-            )
-        );
-        curl_setopt_array($c, $options);
-        $r = curl_exec($c);
-        curl_close($c);
-
-        list($headers, $body) = split("\r\n\r\n", $r);
+        list($headers, $body) = $this->curl(self::REDDIT_ROBIN_URL);
         $html = new \Masterminds\HTML5();
         $dom = $html->loadHTML($body);
         $qp = qp($dom);
@@ -285,28 +282,11 @@ class Robin_IRC {
                 $post_data['vote'] = $payload;
                 break;
         }
-        $post_str = http_build_query($post_data);
-
-        $c = curl_init();
-        curl_setopt_array($c, array(
-            CURLOPT_URL => sprintf(self::REDDIT_POST_URL, $this->robin_id, $type),
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_USERAGENT => 'Robin-IRC Bridge/0.0.1',
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $post_str,
-            CURLOPT_HTTPHEADER => array(
-                'Cookie: ' . join('; ', $this->robin_cookies),
-                'X-Modhash: '.$this->redditmodhash,
-                'X-Requested-With: XMLHTTPRequest',
-                'Content-Type: application/x-www-form-urlencoded',
-                'Content-Length: '.strlen($post_str)
-            )
-        ));
-        $r = curl_exec($c);
-        curl_close($c);
-        print_r($r);
+        $this->curl(
+            sprintf(self::REDDIT_POST_URL, $this->robin_id, $type),
+            true,
+            $post_data
+        );
     }
 
     protected function out_irc($nick, $code, $prefix, $str) {
@@ -415,13 +395,32 @@ class Robin_IRC {
                     case 'WHOIS':
                         $users = split(',', $args[0]);
                         foreach ($users as $user) {
-                            $userkey = strtoupper($user);
+                            $userkey = strtoupper(trim($user));
                             if (isset($this->users[$userkey])) {
+                                $this->api_whois($userkey);
+
                                 $user = $this->users[$userkey];
                                 $userstr = $user['name'];
                                 $this->out_irc(null, '311', array($this->redditnick, $userstr, $userstr, self::ROBIN_HOST, "*"), $user['vote']);
                                 if (!$user['present']) {
                                     $this->out_irc(null, '301', array($this->redditnick, $userstr), "not present");
+                                }
+                                if (isset($user['created_utc'])) {
+                                    $age = date_diff(date_create('@'.time()), date_create('@'.$user['created_utc']));
+                                    $age_parts = array();
+                                    foreach (array(
+                                        'y' => 'years',
+                                        'm' => 'months',
+                                        'd' => 'days',
+                                        'h' => 'hours'
+                                    ) as $key => $val) {
+                                        if ($age->$key) {
+                                            $age_parts[] = ($age->$key)." {$val}";
+                                        }
+                                    }
+
+                                    $this->out_irc(null, '312', array($this->redditnick, $userstr), "karma: {$user['link_karma']} | {$user['comment_karma']}");
+                                    $this->out_irc(null, '312', array($this->redditnick, $userstr), "account age: ".join(', ', $age_parts));
                                 }
                                 $this->out_irc(null, '318', array($this->redditnick, $userstr), "End of /WHOIS");
                             }
@@ -509,6 +508,19 @@ class Robin_IRC {
                         // We need the new websocket URL
                         $this->redditws->close();
                         $this->refresh();
+                        break;
+                }
+                break;
+
+            case 'API':
+                switch (strtoupper($msg)) {
+                    case 'WHOIS':
+                        $username = $args[0];
+                        list($headers, $body) = $this->curl(sprintf(self::REDDIT_WHOIS_URL, $username));
+                        if ($body) {
+                            $data = json_decode($body, true);
+                            $this->users[$username] += $data['data'];
+                        }
                         break;
                 }
                 break;
