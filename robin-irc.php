@@ -60,6 +60,7 @@ class Robin_IRC {
     protected $prefixes = array();
     protected $body_filters = array();
     protected $show_votes = true;
+    protected $show_notices = true;
 
     protected $ircsock;
 
@@ -78,6 +79,7 @@ class Robin_IRC {
     protected $users = array();
 
     protected $last_message;
+    protected $last_message_ratelimit;
 
     public function __construct() {
         $this->ircsock = stream_socket_server(
@@ -185,8 +187,16 @@ class Robin_IRC {
         curl_close($c);
 
         if ($r) {
-            list($headers, $body) = split("\r\n\r\n", $r);
+            $r_split = split("\r\n\r\n", $r);
+            $headers = $r_split[0];
+            $body = $r_split[1];
+            if (isset($r_split[2])) {
+                $more_body = $r_split[2];
+            }
             if ($headers || $body) {
+                if (preg_match('/^HTTP\/1.1 100/', $headers)) {
+                    return array($body, $more_body);
+                }
                 return array($headers, $body);
             } else {
                 return array(false, false);
@@ -257,6 +267,7 @@ class Robin_IRC {
         }
 
         $this->show_votes = $ini['general']['showvotes'];
+        $this->show_notices = $ini['general']['shownotices'];
 
         $vote = 'INCREASE';
         if (isset($ini['general']['autovote'])) {
@@ -282,11 +293,35 @@ class Robin_IRC {
                 $post_data['vote'] = $payload;
                 break;
         }
-        $this->curl(
+        list ($headers, $body) = $this->curl(
             sprintf(self::REDDIT_POST_URL, $this->robin_id, $type),
             true,
             $post_data
         );
+        if ($body) {
+            $body_json = json_decode($body, true);
+            if (isset(
+                $body_json['json'],
+                $body_json['json']['errors'],
+                $body_json['json']['errors'][0]
+            )) {
+                $err = $body_json['json']['errors'][0];
+                switch ($err[0]) {
+                    case 'RATELIMIT':
+                        if (preg_match('/ milliseconds\.$/', $err[1])) {
+                            $this->last_message_ratelimit = 1;
+                        } else {
+                            $matches = array();
+                            preg_match('/ (\d+)\sseconds.$/', $err[1], $matches);
+                            if (isset($matches[0])) {
+                                $this->last_message_ratelimit = $matches[0];
+                            }
+                        }
+                        $this->last_message_ratelimit += time();
+                        break;
+                }
+            }
+        }
     }
 
     protected function out_irc($nick, $code, $prefix, $str) {
@@ -339,8 +374,8 @@ class Robin_IRC {
                         $this->out_irc(null, '375', $this->redditnick, sprintf("- %s MOTD -", self::ROBIN_HOST));
                         $this->out_irc(null, '372', $this->redditnick, "- Current tally of votes");
                         $this->out_irc(null, '372', $this->redditnick, "- ----------------------");
-                        foreach (array('NOVOTE', 'ABANDON', 'CONTINUE', 'INCREASE') as $key) {
-                            $this->out_irc(null, '372', $this->redditnick, sprintf("-     %5d %-8s", $tally[$key], $key));
+                        foreach ($tally as $key => $count) {
+                            $this->out_irc(null, '372', $this->redditnick, sprintf("-     %5d %-8s", $count, $key));
                         }
                         $this->out_irc(null, '372', $this->redditnick, "- ----------------------");
                         $this->out_irc(null, '372', $this->redditnick, sprintf("-     %5d total users", count($this->users)));
@@ -457,6 +492,11 @@ class Robin_IRC {
                         if (time() > ($this->robin_last_load_time + self::ROBIN_TIMEOUT)) {
                             $this->refresh();
                         }
+                        if ($this->last_message_ratelimit && time() > $this->last_message_ratelimit) {
+                            $this->out_robin('message', $this->last_message);
+                            $this->last_message = null;
+                            $this->last_message_ratelimit = null;
+                        }
                         break;
                     case 'CHAT':
                         if (
@@ -496,13 +536,19 @@ class Robin_IRC {
                         }
                         break;
                     case 'PLEASE_VOTE':
-                        $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'Polls are closing soon, please vote');
+                        if ($this->show_notices) {
+                            $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'Polls are closing soon, please vote');
+                        }
                         break;
                     case 'NO_MATCH':
-                        $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'no compatible room found for matching, we will count votes and check again for a match in 1 minute.');
+                        if ($this->show_notices) {
+                            $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, 'no compatible room found for matching, we will count votes and check again for a match in 1 minute.');
+                        }
                         break;
                     case 'SYSTEM_BROADCAST':
-                        $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, $payload['body']);
+                        if ($this->show_notices) {
+                            $this->out_irc(null, 'NOTICE', self::IRC_CHANNEL, $payload['body']);
+                        }
                         break;
                     case 'MERGE':
                         // We need the new websocket URL
