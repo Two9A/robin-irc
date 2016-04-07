@@ -137,8 +137,8 @@ class Robin_IRC {
 
     protected function parse_cookies($headers) {
         $cookies = array();
-        foreach (split("\r\n", $headers) as $header) {
-            $parts = split(':', $header);
+        foreach (explode("\r\n", $headers) as $header) {
+            $parts = explode(':', $header);
             if (count($parts) >= 2) {
                 $h = strtolower(trim($parts[0]));
                 $v = trim($parts[1]);
@@ -187,7 +187,7 @@ class Robin_IRC {
         curl_close($c);
 
         if ($r) {
-            $r_split = split("\r\n\r\n", $r);
+            $r_split = explode("\r\n\r\n", $r);
             $headers = $r_split[0];
             $body = $r_split[1];
             if (isset($r_split[2])) {
@@ -350,7 +350,7 @@ class Robin_IRC {
     }
 
     public function __call($name, $args) {
-        list($protocol, $msg) = split('_', $name, 2);
+        list($protocol, $msg) = explode('_', $name, 2);
         switch (strtoupper($protocol)) {
             case 'IRC':
                 switch (strtoupper($msg)) {
@@ -383,14 +383,14 @@ class Robin_IRC {
                         break;
 
                     case 'JOIN':
-                        $channels = split(',', $args[0]);
+                        $channels = explode(',', $args[0]);
                         foreach ($channels as $chan) {
                             // Don't actually do anything
                         }
                         break;
 
                     case 'PART':
-                        $channels = split(',', $args[0]);
+                        $channels = explode(',', $args[0]);
                         foreach ($channels as $chan) {
                             // Don't actually do anything
                         }
@@ -428,7 +428,7 @@ class Robin_IRC {
                         break;
 
                     case 'WHOIS':
-                        $users = split(',', $args[0]);
+                        $users = explode(',', $args[0]);
                         foreach ($users as $user) {
                             $userkey = strtoupper(trim($user));
                             if (isset($this->users[$userkey])) {
