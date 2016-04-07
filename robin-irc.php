@@ -82,6 +82,8 @@ class Robin_IRC {
     protected $last_message_ratelimit;
 
     public function __construct() {
+        date_default_timezone_set('UTC');
+
         $this->ircsock = stream_socket_server(
             sprintf('tcp://%s:%s', self::IRC_HOST, self::IRC_PORT),
             $errno, $errmsg
@@ -385,14 +387,14 @@ class Robin_IRC {
                     case 'JOIN':
                         $channels = split(',', $args[0]);
                         foreach ($channels as $chan) {
-                            // Don't actually do anything
+                            $this->out_irc($this->redditnick, 'JOIN', null, $chan);
                         }
                         break;
 
                     case 'PART':
                         $channels = split(',', $args[0]);
                         foreach ($channels as $chan) {
-                            // Don't actually do anything
+                            $this->out_irc($this->redditnick, 'PART', null, $chan);
                         }
                         break;
 
