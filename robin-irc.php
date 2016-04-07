@@ -387,9 +387,17 @@ class Robin_IRC {
 
                     case 'JOIN':
                         $channels = explode(',', $args[0]);
+                        $names = array();
+                        foreach ($this->users as $k => $user) {
+                            array_push($names, $user["name"]);
+                        }
                         foreach ($channels as $chan) {
                             array_push($this->chans, $chan);
                             $this->out_irc($this->redditnick, 'JOIN', sprintf(":%s", $chan), "");
+                            foreach (array_chunk($names, 20) as $k => $names) {
+                                $this->out_irc(null, '353', sprintf("%s = %s", $this->redditnick, $chan), implode(" ", $names));
+                            }
+                            $this->out_irc(null, '366', sprintf("%s %s", $this->redditnick, $chan), "End of NAMES list");
                         }
                         break;
 
