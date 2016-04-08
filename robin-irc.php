@@ -77,6 +77,7 @@ class Robin_IRC {
     protected $robin_cookies = array();
     protected $robin_last_load_time;
     protected $users = array();
+    protected $chans = array();
 
     protected $last_message;
     protected $last_message_ratelimit;
@@ -386,15 +387,25 @@ class Robin_IRC {
 
                     case 'JOIN':
                         $channels = explode(',', $args[0]);
+                        $names = array();
+                        foreach ($this->users as $k => $user) {
+                            array_push($names, $user["name"]);
+                        }
                         foreach ($channels as $chan) {
-                            $this->out_irc($this->redditnick, 'JOIN', null, $chan);
+                            array_push($this->chans, $chan);
+                            $this->out_irc($this->redditnick, 'JOIN', sprintf(":%s", $chan), "");
+                            foreach (array_chunk($names, 20) as $k => $names) {
+                                $this->out_irc(null, '353', sprintf("%s = %s", $this->redditnick, $chan), implode(" ", $names));
+                            }
+                            $this->out_irc(null, '366', sprintf("%s %s", $this->redditnick, $chan), "End of NAMES list");
                         }
                         break;
 
                     case 'PART':
                         $channels = explode(',', $args[0]);
+                        $this->chans = array_diff($this->chans, $channels);
                         foreach ($channels as $chan) {
-                            $this->out_irc($this->redditnick, 'PART', null, $chan);
+                            $this->out_irc($this->redditnick, 'PART', sprintf(":%s", $chan), "");
                         }
                         break;
 
@@ -517,7 +528,8 @@ class Robin_IRC {
                             }
                             list($channel, $body) = $this->filter_channel($body);
                             $body = $this->filter_body($body);
-                            if ($body) {
+                            // Only send for channels we have joined
+                            if ($body && in_array($channel, $this->chans)) {
                                 if ($action) {
                                     $body = "\001ACTION {$body}\001";
                                 }
